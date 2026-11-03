@@ -1,0 +1,50 @@
+=== ARCHIVIST'S HARDWARE DATASHEET (REV 1.0) ===
+
+[1] CARRIER (MirrorStego v1)
+- Stream  : WAV `data` chunk, interleaved int16 LE samples S[0..M). Inspect low_byte(S[i]) only.
+- Schedule: SplitMix64(K), starting at sample index p = -1. Two PRNG draws per hidden bit:
+    draw_1 -> step : p += 1 + (draw_1 % 4096)
+    draw_2 -> mask : w = (draw_2 >> 17) & 0xFF
+- Bit Rule: bit = popcount(low_byte(S[p]) ^ w) & 1, packed MSB-first into bytes.
+- Frame   : "MIRRORS1" (8B) | payload_len (u32 LE) | crc32 (u32 LE) | payload
+
+[2] PROCESSOR (MVM1 Architecture)
+- Image   : "MVM1" (4B) | code_len (u32 LE) | data_len (u32 LE) | entry (u16 LE) | rsv (u16 LE)
+- Memory  : 64 KiB CODE, 64 KiB DATA (separate spaces), 16x u64 registers (R0..R15), 256-entry stack.
+- R15 Hash: Initialized to 0xCBF29CE484222325. On EVERY instruction fetch (pre-decode/exec):
+    R15 = ((R15 ^ opcode) * 0x100000001B3) mod 2^64
+    R15 = R15 ^ (R15 >> 31)
+- Encoding: 2-reg byte = (rd << 4) | rs; 1-reg byte = r & 0xF; all immediates are little-endian.
+- ISA     :
+    6E: NOP (1B)                     39: SHL [r][u8] (3B, shift = u8 & 63)
+    3A: IMM [r][u64] (10B)           8D: SHR [r][u8] (3B, shift = u8 & 63)
+    D1: MOV [rd|rs] (2B)             61: ROL [r][u8] (3B, rotl64 by u8 & 63)
+    95: LDB [rd|rs] (DATA[R[rs]])    F2: JMP [u16] (3B, pc = u16)
+    4C: STB [rd|rs] (DATA[R[rd]])    1D: JZ  [r][u16] (4B, if R[r]==0)
+    27: LDQ [rd|rs] (u64 DATA[R[rs]])C4: JNZ [r][u16] (4B, if R[r]!=0)
+    B8: STQ [rd|rs] (u64 DATA[R[rd]])50: JLT [rd|rs][u16] (4B, unsigned <)
+    6A: LDC [rd|rs] (CODE[R[rs]])    9A: CALL [u16] (3B, push pc+3)
+    7F: ADD [rd|rs]                  2E: RET (1B, pop pc)
+    E3: SUB [rd|rs]                  B3: OUT [r] (2B, emit R[r] & 0xFF)
+    12: MUL [rd|rs]                  E8: PCH [rd|rs] (2B, CODE[R[rd]] = R[rs] & 0xFF)
+    A6: XOR [rd|rs]                  0B: HLT (1B)
+    5B: AND [rd|rs]                  74: NOT [r] (2B, R[r] = ~R[r])
+    CC: OR  [rd|rs]
+    47: SMC [rd|rs][u16] (4B) -> len = u16 (0 means 0x10000); seed = R[rs] ^ R15
+        x = seed if seed != 0 else 0x9E3779B97F4A7C15
+        for i in 0..len-1:
+          x ^= (x << 13) mod 2^64; x ^= (x >> 7); x ^= (x << 17) mod 2^64
+          CODE[(R[rd] + i) & 0xFFFF] ^= (x >> 24) & 0xFF
+
+[3] PAYLOAD TLV & UNSEALING
+- TLV     : "MIRRORS1" (8B), then records of `type (u8) | len (u16 LE) | value` until type 0x00:
+            01..06: curve n, p, a, b, Gx, Gy (32B BE) | 07: Q (64B BE) | 08: param L (1B)
+            09: count (u16 LE) | 0A: tuple (3x 32B BE) | 0B: sealed blob
+- KDF(d)  : st = 0x4D6972726F72734B; D = d.to_bytes(32, 'big'); out = b""
+            for rnd in 0..3:
+              for b in D: st = (st ^ b) * 0x100000001B3; st ^= st >> 29; st *= 0x9E3779B97F4A7C15; st ^= st >> 32 (all mod 2^64)
+              st = (st + rnd * 0xFF51AFD7ED558CCD) mod 2^64; out += st.to_bytes(8, 'big')
+- Stream  : Load key32 as four u64 LE words (a, b, c, d), ctr = 0. Per 8B block:
+            ctr = (ctr + 0x9E3779B97F4A7C15) mod 2^64; d ^= ctr
+            repeat 4 times: a+=b; d=rotl64(d^a,32); c+=d; b=rotl64(b^c,24); a+=b; d=rotl64(d^a,16); c+=d; b=rotl64(b^c,37)
+            emit (a ^ c) as 8B LE, XOR against sealed blob.

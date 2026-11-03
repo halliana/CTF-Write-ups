@@ -1,0 +1,12 @@
+{
+  "n": "0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+  "p": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f",
+  "a": "0x0",
+  "b": "0x7",
+  "Gx": "0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+  "Gy": "0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8",
+  "Qx": "0xf5d07683ee055bd35c4de3f0b5ce2a04d65598ebaac584f2b32a1e7c813c2c2d",
+  "Qy": "0x6ba9329be937aae35a1b8d418ddf643a22e92bf954cfa169c3e21ec25b22784d",
+  "L": "0xc",
+  "declared_count": "0x30"
+}
